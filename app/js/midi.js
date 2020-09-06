@@ -1,10 +1,12 @@
 /**
  * This module defines the functions for interacting with the web midi api.
  */
+import {updateCurrentBPM} from "./dom_handler.js"
+
 // Transport Variables
 var bpm = 120.0;  // beats per minute
 var current_pattern = 0;  // the currently playing pattern
-var queued_patterns = []; // an array of patterns to play next
+var queued_patterns = {}; // a dictionary of patterns to play next
 var ppq = 24;  // midi pulses per quarter note
 var bpm_array = new Array(ppq).fill(0.0);  // an array of bpm values for averaging
 var previous_clock_time = 0.0;  // time since the last clock tick
@@ -15,9 +17,8 @@ const patterns_per_bank = 16;
 
 // Transport Input Functions
 /**
- * Callback on clock event, sets bpm to an average of the last
- * number of ticks.
-*/
+ * Callback on clock event, sets bpm based on average tick interval.
+ */
 function _clockReceive(event) {
     // Get the time difference between this tick and the last
     var clock_diff = event.timestamp - previous_clock_time;
@@ -30,10 +31,10 @@ function _clockReceive(event) {
     // get the average difference
     const diff_average = clock_diffs.reduce((a, b) => a + b, 0) / clock_diffs.length;
 
-    // now determine the tempo, we expect 24 ticks beat,
+    // now determine the tempo, we expect 24 (ppq) ticks beat,
     // so we can use this to determine a tempo in beats per minute
-    const beat_time = diff_average * 24;
-    const beats_per_second = 1000 / beat_time;
+    const beat_time = diff_average * ppq;
+    const beats_per_second = 1000 / beat_time; //convert to milli seconds
     bpm_array.push(beats_per_second * 60);
     bpm_array.shift();
 
@@ -42,7 +43,7 @@ function _clockReceive(event) {
     bpm = Math.round(average_bpm * 10) / 10;
 
     // now show it in the html
-    document.getElementById("current_bpm").innerHTML = bpm;
+    updateCurrentBPM(bpm);
 }
 
 
@@ -51,6 +52,7 @@ function _clockReceive(event) {
  */
 function _startReceive(event) {
     console.log("Start: ", event.timestamp);
+
 }
 
 
@@ -62,28 +64,72 @@ function _stopReceive(event) {
 }
 
 
+/**
+ * Callback on midi program change event.
+ */
 function _prgmchangeReceive(event) {
     const pattern_name = _derivePatternName(event.value);
     console.log("recieved pattern: ", pattern_name);
-    // now show it
-    document.getElementById("current_pattern").innerHTML = pattern_name;
 }
-
 
 /**
- * Setup the input event listeners.
- */
-function _setupInputListeners(main_clock_device, main_clock_channel) {
+ * Setup a list of listeners on a midi device
+*/
+function _setupListeners(midi_device, listeners) {
+    // Remove any existing listeners
+    for (const listener of listeners) {
+        midi_device.removeListener.apply(midi_device, listener);
+        midi_device.addListener.apply(midi_device, listener);
+    }
+}
 
+/**
+ * Setup the input midi event listeners for the main clock source.
+ */
+function _setupMainClock(midi_device, midi_channel) {
     // Define the listeners
-    main_clock_device.addListener("clock", main_clock_channel.toString(), _clockReceive);
-    main_clock_device.addListener("start", main_clock_channel.toString(), _startReceive);
-    main_clock_device.addListener("stop", main_clock_channel.toString(), _stopReceive);
-    main_clock_device.addListener("programchange", main_clock_channel.toString(), _prgmchangeReceive);
+    const clock_channel = midi_channel.toString();
+    const clock_listener = ["clock", clock_channel, _clockReceive];
+    const start_listener = ["start", clock_channel, _startReceive];
+    const stop_listener = ["stop", clock_channel, _stopReceive];
+    const main_clk_listeners = [clock_listener, start_listener, stop_listener]
+    // remove all other devices clock listeners
+    for (const device of WebMidi.inputs) {
+        for (const listener of main_clk_listeners) {
+            device.removeListener.apply(device, listener);
+        }
+    }
+    const prgm_chng_listener = ["programchange", clock_channel, _prgmchangeReceive]
+    _setupListeners(midi_device, main_clk_listeners);
 }
 
 
-// Output Functions
+// MidiOutputProcessor Functions
+/**
+ * Queue a pattern to a midi output processor.
+ * Queue a pattern to begin playing once the transport reaches the start position.
+ */
+function _queuePattern(pattern_name) {
+    const pattern_num = _deriveProgramNumber(pattern_name);
+    this.queued_patterns.push(pattern_num);
+}
+
+function _processPatternQueue(midi_device) {
+
+}
+
+/**
+ * Given a digi-form pattern_name (eg A12, B14), send a program change message
+ * to the given midi device.
+ */
+function _changePattern(midi_device, pattern_name) {
+    console.log("changing pattern of device", midi_device);
+    const program_number = _deriveProgramNumber(pattern_name);
+    midi_device.sendProgramChange(program_number);
+    console.log("Switched to :", pattern_name, "--- prg:", program_number);
+}
+
+// HELPER FUNCTIONS
 /**
  * Derive the program change number from the pattern name
  */
@@ -128,48 +174,44 @@ function _derivePatternName(program_number) {
 }
 
 
-/**
- * Queue a pattern to begin playing once the transport reaches the start position.
- */
-function _queuePattern(midi_device, pattern_name, start_position, offset=0) {
-
-}
-
-
+// MIDI processors
 // Base midi processor
-// function MidiProcessor(midi_device) {
-
-//     const init = function (midi_device) {
-//         this.device = midi_device;
-//     }
-
-
-//     return {init}
-// }
-
+function MidiProcessor(midi_device, channel) {
+    this.device = midi_device;
+    this.channel = channel;
+    this.name = this.device.name;
+}
 
 // Public API
 // Input
-export function MidiInputProcessor(input_device, channel) {
-    this.device = input_device;
-    this.channel = channel;
-    _setupInputListeners(this.device, this.channel);
+export function MidiInputProcessor(input_device, channel, main_clock=false) {
+    MidiProcessor.call(this, input_device, channel);
+
+    // if this is the main clock source, then set it up
+    if (main_clock) {
+        _setupMainClock(this.device, this.channel)
+    }
+    // _setupInputListeners(this.device, this.channel);
 }
 
 
 // Output
-export function MidiOutputProcessor(output_device, clock_source) {
-    this.device = output_device;
-}
-
-
 /**
- * Given a digi-form pattern_name (eg A12, B14), send a program change message
- * to the given midi device.
- */
-MidiOutputProcessor.prototype.changePattern = function(pattern_name) {
-    console.log("changing pattern of device", this);
-    const program_number = _deriveProgramNumber(pattern_name);
-    this.device.sendProgramChange(program_number);
-    console.log("Switched to :", pattern_name, "--- prg:", program_number);
+ * A track of DigiSong, this represents all the information about a single
+ * track, such as midi device, and patterns.
+*/
+export function DigiSongTrack(midi_device, clock_source) {
+    MidiProcessor.call(this, midi_device, clock_source.channel);
+    this.clock_source = clock_source;
+    this.running = false;
+    this.queued_patterns = []
+}
+DigiSongTrack.prototype.queuePattern = function(pattern_name) {
+    _queuePattern.call(this, pattern_name);
+}
+DigiSongTrack.prototype.clearPatterns = function() {
+    this.queued_patterns = [];
+}
+DigiSongTrack.prototype.changePattern = function(pattern_name) {
+    _changePattern(this.device, pattern_name);
 }

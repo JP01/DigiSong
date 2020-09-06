@@ -1,6 +1,6 @@
 # DigiSong
 
-A web based midi program change sequencer for Elektron's Digitakt and Digitone.
+A web based midi program-change sequencer for Elektron's Digitakt and Digitone.
 
 ## **User Guide**
 
@@ -34,15 +34,30 @@ the latest Digi OS updates DT(1.20) and DN(1.30) which now support USB audo/midi
 ## **Developer Guide**
 
 ### ***APIs and Frameworks***
-Project uses webmidi.js
+Project uses
+
+webmidi.js
 https://github.com/djipco/webmidi
+
+react.js
+https://reactjs.org/
 
 ### ***Setup***
 Requires npm
 1. Clone the repo
 2. `npm install`
 
-### ***User Stories***
+## **Developing**
+You can use node to develop "live" in a broswer.
+You can use the command 'http-server -c-1' to run a server which you can connect to:
+
+sudo npm install -g http-server
+sudo apt install net-tools
+ifconfig | grep "inet" | grep -v 127.0.0.1
+http-server -c-1
+
+
+## ***User Stories***
 As a user I can
 1. Select a master clock midi device
     1. This will control tempo, transport control etc

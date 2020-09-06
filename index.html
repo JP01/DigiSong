@@ -4,16 +4,22 @@
     <link rel="shortcut icon" href="">
 </header>
 
+<script src="node_modules/webmidi/webmidi.min.js"></script>
+<script type="module" src="app/js/app.js"></script>
+
+<div>
+    <span>Main Clock Source:</span>
+    <select id="main_clock_source"></select>
+</div>
+<br>
 <div>
 <span>bpm:</span><span id="current_bpm">120</span>
 </div>
-
-<div>
-<span>pattern: </span><span id="current_pattern">A1</span>
+<br>
+<div id="sequencer">
+    <button id="create_new_track">Create New Track</button>
+    <p>Tracks</p>
+    <ul id="tracks">
+    </ul>
 </div>
-
-<body>
-    <script src="node_modules/webmidi/webmidi.min.js"></script>
-    <script type="module" src="app/js/app.js"></script>
-</body>
 </html>
