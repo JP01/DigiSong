@@ -3,6 +3,10 @@
  */
 import {updateCurrentBPM} from "./dom_handler.js"
 
+// global to store clock source
+var main_clock_source = undefined;
+var main_clock_channel = 1;
+
 // Transport Variables
 var bpm = 120.0;  // beats per minute
 var current_pattern = 0;  // the currently playing pattern
@@ -87,19 +91,23 @@ function _setupListeners(midi_device, listeners) {
  * Setup the input midi event listeners for the main clock source.
  */
 function _setupMainClock(midi_device, midi_channel) {
+    // Sets the global clock to this
+    main_clock_source = midi_device;
+    main_clock_channel = midi_channel;
     // Define the listeners
     const clock_channel = midi_channel.toString();
     const clock_listener = ["clock", clock_channel, _clockReceive];
     const start_listener = ["start", clock_channel, _startReceive];
     const stop_listener = ["stop", clock_channel, _stopReceive];
-    const main_clk_listeners = [clock_listener, start_listener, stop_listener]
+    const prgm_chng_listener = ["programchange", clock_channel, _prgmchangeReceive];
+
+    const main_clk_listeners = [clock_listener, start_listener, stop_listener, prgm_chng_listener];
     // remove all other devices clock listeners
     for (const device of WebMidi.inputs) {
         for (const listener of main_clk_listeners) {
             device.removeListener.apply(device, listener);
         }
     }
-    const prgm_chng_listener = ["programchange", clock_channel, _prgmchangeReceive]
     _setupListeners(midi_device, main_clk_listeners);
 }
 
@@ -175,18 +183,12 @@ function _derivePatternName(program_number) {
 
 
 // MIDI processors
-// Base midi processor
-function MidiProcessor(midi_device, channel) {
-    this.device = midi_device;
+
+// Input
+function MidiInputProcessor(input_device, channel, main_clock=false) {
+    this.device = input_device;
     this.channel = channel;
     this.name = this.device.name;
-}
-
-// Public API
-// Input
-export function MidiInputProcessor(input_device, channel, main_clock=false) {
-    MidiProcessor.call(this, input_device, channel);
-
     // if this is the main clock source, then set it up
     if (main_clock) {
         _setupMainClock(this.device, this.channel)
@@ -200,10 +202,13 @@ export function MidiInputProcessor(input_device, channel, main_clock=false) {
  * A track of DigiSong, this represents all the information about a single
  * track, such as midi device, and patterns.
 */
-export function DigiSongTrack(midi_device, clock_source) {
-    MidiProcessor.call(this, midi_device, clock_source.channel);
-    this.clock_source = clock_source;
-    this.running = false;
+export function DigiSongTrack(track_num) {
+    this.device = undefined;
+    this.channel = 1;
+    this.name = "";
+    this.clock_source_device = main_clock_source;
+    this.clock_source_channel = main_clock_channel;
+    this.track_num = track_num;
     this.queued_patterns = []
 }
 DigiSongTrack.prototype.queuePattern = function(pattern_name) {
@@ -214,4 +219,37 @@ DigiSongTrack.prototype.clearPatterns = function() {
 }
 DigiSongTrack.prototype.changePattern = function(pattern_name) {
     _changePattern(this.device, pattern_name);
+}
+DigiSongTrack.prototype.setDevice = function(midi_device) {
+    console.log("Track: ", this.track_num, " Device", midi_device.name);
+    this.device = midi_device;
+    this.name = this.device.name;
+}
+DigiSongTrack.prototype.setChannel = function(channel) {
+    console.log("Track: ", this.track_num, " Channel", channel);
+    this.channel = channel;
+}
+
+/**
+ * The main sequencer object which maintains references to tracks.
+ */
+export function DigiSongSequencer(midi_inputs, midi_outputs) {
+    // assign the possible midi devices
+    this.midi_inputs = midi_inputs;
+    this.midi_outputs = midi_outputs;
+
+    // now assign the other internal vars
+    this.tracks = [];
+    this.running = false;
+}
+DigiSongSequencer.prototype.setClockSource = function(main_clock_device,main_clock_channel) {
+    this.clock_source = new MidiInputProcessor(
+        main_clock_device, main_clock_channel, true
+    );
+}
+DigiSongSequencer.prototype.createTrack = function() {
+    const next_tracknum = this.tracks.length;
+    var new_track = new DigiSongTrack(next_tracknum)
+    this.tracks.push(new_track);
+    return new_track;
 }
