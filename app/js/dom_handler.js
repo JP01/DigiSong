@@ -70,6 +70,29 @@ export function showPatternQueue(track) {
     }
 }
 
+/*
+
+Main Clock / Sequencer
+
+*/
+
+// the start button element
+function elemStartButton() {
+    var start_button = document.createElement("button");
+    start_button.id = "start_button";
+    start_button.textContent = "Play";
+    start_button.onclick = ()=>_sequencer.start();
+    return start_button;
+}
+
+// the stop button element
+function elemStopButton() {
+    var stop_button = document.createElement("button");
+    stop_button.id = "stop_button";
+    stop_button.textContent = "Stop";
+    stop_button.onclick = ()=>_sequencer.stop();
+    return stop_button;
+}
 
 function selectMainClock() {
     // use -1 as theres default placeholder in the dropdown which occupies the first index
@@ -86,6 +109,10 @@ function selectMainClock() {
 }
 
 export function createMainClockSelect(sequencer, default_device=-1) {
+    // set the global sequencer
+    _sequencer = sequencer;
+
+    // Setup the device selected callback
     const deviceSelectedCallback = () => selectMainClock();
 
     // create a list of device names for populating dropdown
@@ -109,6 +136,13 @@ export function createMainClockSelect(sequencer, default_device=-1) {
     );
     main_clock_element.appendChild(main_clock_channel);
 
+    // transport control buttons
+    const play_button = elemStartButton();
+    const stop_button = elemStopButton();
+    main_clock_element.appendChild(play_button);
+    main_clock_element.appendChild(stop_button);
+
+
     // select a default device and trigger the callback
     if (default_device >= 0) {
         main_clock_device.value = device_names[default_device];
@@ -118,19 +152,13 @@ export function createMainClockSelect(sequencer, default_device=-1) {
     return main_clock_element;
 }
 
-// callback when create track button is clicked.
-function createTrackClicked(track_element) {
-    // Set the current track to active
-    track_element.create_track_button.hidden = true;
-    track_element.midi_options.hidden = false;
-    track_element.pattern_sequence.hidden = false;
+/*
 
-    // and create a new track stub
-    createTrack();
-}
+Track Creation
 
+*/
 // Button element for creating tracks
-function elemCreateTrackButton(track_element) {
+function elemAddTrackButton(track_element) {
     var create_track_button = document.createElement("button");
     create_track_button.id = "track_create_" + track_element.track_num;
     create_track_button.textContent = "Create New Track";
@@ -170,17 +198,7 @@ function elemTrackMidiOptions(track_element) {
     return track_midi_options;
 }
 
-// Create a track for the given sequencer
-// init = true when creating the first sequencer track
-export function createTrack(sequencer=undefined) {
-    if (!_sequencer) {
-        _sequencer = sequencer;
-    }
-    var new_track = _sequencer.createTrack();
-    var track_element = new TrackElement(new_track);
-    return track_element;
-}
-
+// callback when a track midi device is selected
 function trackMidiSelected(track_element) {
     // get the selectede midi options
     const device_idx = getUserSelection("track_device_" + track_element.track_num) - 1;
@@ -192,6 +210,29 @@ function trackMidiSelected(track_element) {
     track_element.track.setDevice(device);
     track_element.track.setChannel(channel);
 }
+
+// Create a track for the given sequencer
+export function createTrack() {
+    if (!_sequencer) {
+        console.log("No Main Clock Source defined, please select a clock source!");
+        return;
+    }
+    var new_track = _sequencer.createTrack();
+    var track_element = new TrackElement(new_track);
+    return track_element;
+}
+
+// callback when create track button is clicked.
+function createTrackClicked(track_element) {
+    // Set the current track to active
+    track_element.create_track_button.hidden = true;
+    track_element.midi_options.hidden = false;
+    track_element.pattern_chain.hidden = false;
+
+    // and create a new track stub
+    createTrack();
+}
+
 
 export function TrackElement(track) {
     /* This object represents the DOM Track element and all the nested
@@ -211,7 +252,7 @@ export function TrackElement(track) {
     track_item.id = "track_" + this.track_num;
 
     // create the 'create track' button
-    this.create_track_button = elemCreateTrackButton(self);
+    this.create_track_button = elemAddTrackButton(self);
     track_item.appendChild(this.create_track_button);
 
     // Create the midi selector
@@ -220,10 +261,9 @@ export function TrackElement(track) {
     track_item.appendChild(this.midi_options);
 
     // Create the pattern sequencer
-    this.pattern_sequence = document.createElement("ul");
-    this.pattern_sequence.id = "track_patterns_" + this.track_num;
-    this.pattern_sequence.hidden = true;
-    track_item.appendChild(this.pattern_sequence);
+    this.pattern_chain = PatternChainElement(self);
+    this.pattern_chain.hidden = true;
+    track_item.appendChild(this.pattern_chain);
 
     // Add the track to the tracks
     track_elements.appendChild(track_item);
@@ -231,11 +271,77 @@ export function TrackElement(track) {
 }
 
 
-function createPatternClicked() {
-    var new_pattern = document.createElement("li");
-    this.patterns_element
+/*
+    Track Patterns
+*/
+function createPatternClicked(button_element, track_element) {
+    // Queue the default pattern
+    track_element.track.queuePattern();
+
+    // create a pattern selector in the current slot
+    var current_pattern_slot = button_element.parentElement;
+    const select_name =  current_pattern_slot.id + "_select";
+
+    var pattern_select = _createSelectionList(
+        select_name,
+        track_element.track.pattern_options,
+        patternSelected.bind(this, track_element, current_pattern_slot)
+    );
+    current_pattern_slot.appendChild(pattern_select);
+
+    // Hide the create pattern button of the current slot
+    button_element.hidden = true;
+
+    // Create the new pattern and fill it with a create button
+    const new_pattern_slot = PatternSlotElement(track_element);
+    track_element.pattern_chain.appendChild(new_pattern_slot);
 }
 
-function PatternElement(track_element) {
+// Add a pattern to the track element
+function elemAddPatternButton(track_element) {
+    var add_pattern_button = document.createElement("button");
+    add_pattern_button.id = "pattern_create_" + track_element.track_num;
+    add_pattern_button.textContent = "Create New Pattern";
+    add_pattern_button.onclick = () => createPatternClicked(add_pattern_button, track_element);
+    return add_pattern_button;
+}
 
+// callback which gets triggered when a pattern is selected
+function patternSelected(track_element, pattern_slot_element) {
+
+    // Get an array of all the slot elements and use this to determine
+    // the current slotnum
+    const all_slots = Array.from(pattern_slot_element.parentElement.children);
+    const slot_num = all_slots.indexOf(pattern_slot_element);
+
+    // get the selected pattern and set it in the track
+    const pattern_select = pattern_slot_element.getElementsByTagName("select")[0];
+    const selection = getUserSelection(pattern_select.id);
+    track_element.track.updatePattern(slot_num, selection);
+    console.log("Selected pattern", selection);
+}
+
+// Represent a pattern slot element
+function PatternSlotElement(track_element) {
+    const slot_num = track_element.track.queued_patterns.length;
+    var pattern_slot = document.createElement("li");
+    pattern_slot.id = "pattern_" + track_element.track_num + "_" + slot_num;
+
+    // add the creation button
+    const add_pattern_button = elemAddPatternButton(track_element);
+    pattern_slot.appendChild(add_pattern_button);
+
+    return pattern_slot;
+}
+
+// Represent the chain of patterns element
+function PatternChainElement(track_element) {
+    // create a new pattern chain
+    var pattern_chain = document.createElement("ul");
+    pattern_chain.id = "patterns_" + track_element.track_num;
+
+    // Create the first slot
+    var pattern_slot = PatternSlotElement(track_element);
+    pattern_chain.appendChild(pattern_slot);
+    return pattern_chain;
 }
